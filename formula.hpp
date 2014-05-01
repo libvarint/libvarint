@@ -4,7 +4,7 @@
 #include <vector>
 #include <iostream>
 #include <map>
-
+#include <cmath>
 
 namespace varint {
 namespace formula {
@@ -17,10 +17,12 @@ template<class Field> class Constant;
 template<class Field> class Element {
 protected:
 	int id;
-	Element *parent;
+	Element<Field> *parent;
 public:
 	Element() : id(0) {}
 	Element(Element<Field>* _parent) : parent(_parent) {}
+	void setParent(Element<Field> *_parent) { parent = _parent; }
+	Element<Field> *getParent() { return parent; }
 	virtual void canonify() {}
 	virtual Element<Field>* copy() const { return new Element<Field>(*this); }
 	virtual Element<Field>* evaluate(std::map<const std::string, Element<Field>*> values) const { return new Element<Field>(parent); }
@@ -91,7 +93,7 @@ public:
 		}
 		return ret;
 	}
-	virtual void add(Element<Field>* term) { terms.push_back(term); }
+	virtual void add(Element<Field>* term) { terms.push_back(term); term->setParent(this); }
 	virtual std::ostream& print(std::ostream& os) const {
 		for (typename std::vector<Element<Field>*>::const_iterator term = terms.begin(); term != terms.end(); term++) {
 			if (term != terms.begin()) {
@@ -122,7 +124,7 @@ public:
 		}
 		return ret;
 	}
-	virtual void add(Element<Field>* term) { terms.push_back(term); }
+	virtual void add(Element<Field>* term) { terms.push_back(term); term->setParent(this); }
 	virtual std::ostream& print(std::ostream& os) const {
 		for (typename std::vector<Element<Field>*>::const_iterator term = terms.begin(); term != terms.end(); term++) {
 			if (term != terms.begin()) {
@@ -143,7 +145,7 @@ protected:
 	Element<Field> *denominator;
 public:
 	Ratio() {}
-	Ratio(Element<Field> *_numerator, Element<Field> *_denominator) : numerator(_numerator), denominator(_denominator) {}
+	Ratio(Element<Field> *_numerator, Element<Field> *_denominator) : numerator(_numerator), denominator(_denominator) { _numerator->setParent(this); _denominator->setParent(this); }
 	virtual Element<Field>* copy() { return new Ratio<Field>(*this); }
 	virtual Field nevaluate(std::map<const std::string, Field> values) { return numerator->nevaluate(values)/denominator->nevaluate(values); }
 	virtual Element<Field>* evaluate(std::map<const std::string, Element<Field>*> values) const {
@@ -154,9 +156,11 @@ public:
 	}
 	virtual void setNumerator(Element<Field>* elem) {
 		numerator = elem;
+		elem->setParent(this);
 	}
 	virtual void setDenominator(Element<Field>* elem) {
 		denominator = elem;
+		elem->setParent(this);
 	}
 	virtual std::ostream& print(std::ostream &os) const {
 		os<<"\\frac{"<<*numerator<<"}{"<<*denominator<<"}";
@@ -164,15 +168,68 @@ public:
 	}
 };
 
-template<class Field> class Function : public Element<Field> {
+template<class Field, unsigned int nargs> class Function : public Element<Field> {
 protected:
-	std::string name;	
+	std::string name;
+	Element<Field>* expressions[nargs];
+public:
+	Function(std::string _name) : name(_name) {}
+	virtual Element<Field>* copy() { return new Function<Field, nargs>(*this); }
+	virtual void setExpression(unsigned int index, Element<Field>* _expression) { expressions[index] = _expression; _expression->setParent(this); }
+	virtual Field nevaluate(std::map<const std::string, Field> values) { return 0; }
+	virtual Element<Field>* evaluate(std::map<const std::string, Element<Field>*> values) const {
+		Function<Field, nargs> *ret = new Function<Field, nargs>(name);
+		for(unsigned int i=0; i<nargs; i++) {
+			ret->setExpression(i, expressions[i]);
+		}
+		return ret;
+	}
+	virtual std::ostream& print(std::ostream &os) const {
+		os<<*name<<"(";
+		for(unsigned int i=0; i<nargs; i++) {
+			os<<*expressions[i];
+			if (i>0) os<<",";
+		}
+		os<<")";
+	}
 };
 
-template<class Field, class FieldPower> class Power : public Function<Field> {
+template<class Field> class Function<Field, 1> : public Element<Field> {
 protected:
-	FieldPower power;
-	Element<Field> *expression;
+	std::string name;
+	Element<Field>* expression;
+public:
+	Function(std::string _name, Element<Field> *_expression) : name(_name), expression(_expression) { _expression->setParent(this); }
+	virtual Element<Field>* copy() { return new Function<Field, 1>(*this); }
+	virtual void setExpression(Element<Field>* _expression) { expression = _expression; _expression->setParent(this); }
+	virtual Field nevaluate(std::map<const std::string, Field> values) { return expression->nevaluate(values); }
+	virtual Element<Field>* evaluate(std::map<const std::string, Element<Field>*> values) const {
+		Function<Field, 1> *ret = new Function<Field, 1>(name, expression->copy()->evaluate(values));
+		return ret;
+	}
+	virtual std::ostream& print(std::ostream &os) const {
+		os<<name<<"("<<*expression<<")";
+		return os;
+	}
+};
+
+
+template<class Field> class Power : public Function<Field, 1> {
+protected:
+	Element<Field> *power;
+public:
+	Power(Element<Field> *_expression, Element<Field> *_power) : Function<Field, 1>("power", _expression), power(_power) { _power->setParent(this); }
+	virtual Element<Field>* copy() { return new Power<Field>(*this); }
+	virtual void setPower(Element<Field>* _power) { power = _power; _power->setParent(this); }
+	virtual Field nevaluate(std::map<const std::string, Field> values) { return pow(this->expression->nevaluate(values), power->nevaluate(values)); }
+	virtual Element<Field>* evaluate(std::map<const std::string, Element<Field>*> values) const {
+		Power<Field> *ret = new Power<Field>(this->expression->copy()->evaluate(values), power->copy()->evaluate(values));
+		return ret;
+	}
+	virtual std::ostream& print(std::ostream &os) const {
+		os<<"{"<<*(this->expression)<<"}^{"<<*power<<"}";
+		return os;
+	}
 };
 
 template<class Field> class InfiniteSum : public Element<Field> {
@@ -185,6 +242,11 @@ protected:
 template<class Field> class FiniteSum : public InfiniteSum<Field> {
 protected:
 	int ending_index;
+};
+
+template<class Field> class TaylorSeries : public InfiniteSum<Field> {
+protected:
+	//std::vector<Range<Field> *> convergence_region;
 };
 
 template<class Field> class Integral : public Element<Field> {
@@ -211,6 +273,7 @@ private:
 
 public:
 	Formula(const Formula<PhaseSpace, Field> &_formula) {}
+	Formula(Element<Field> *_formulaElement) : formulaElement(_formulaElement) { formulaElement->setParent(this); }
 	virtual Element<Field>* copy() const { return new Formula<PhaseSpace, Field>(*this); }
 	virtual std::ostream& print(std::ostream& os) const {
 		os<<*formulaElement;

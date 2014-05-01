@@ -13,6 +13,7 @@ int main() {
 	Sum<int> *sum = new Sum<int>();
 	Ratio<int> *ratio = new Ratio<int>(one, two);
 	Product<int> *product = new Product<int>();
+	Power<int> *power = new Power<int>(var, two);
 	product->add(one);
 	product->add(two);
 	product->add(var);
@@ -28,12 +29,15 @@ int main() {
 	cout<<*sum<<"\n";
 	cout<<*ratio<<"\n";
 	cout<<*product<<"\n";
+	cout<<*power<<"\n";
 	cout<<*(var->evaluate(values))<<"\n";
 	tmp = sum->evaluate(values);
 	cout<<*tmp<<"\n";
 	cout<<sum->nevaluate(vals)<<"\n";
 	cout<<ratio->nevaluate(vals)<<"\n";
 	cout<<product->nevaluate(vals)<<"\n";
+	cout<<power->nevaluate(vals)<<"\n";
 	cout<<*(product->evaluate(values))<<"\n";
+	cout<<*(power->evaluate(values))<<"\n";
 	return 0;
 }
