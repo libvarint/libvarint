@@ -10,6 +10,8 @@ int main() {
 	Constant<int> *one = new Constant<int>(1);
 	Constant<int> *two = new Constant<int>(2);
 	Variable<int> *var = new Variable<int>("a");
+	Variable<int> *varb = new Variable<int>("b");
+	Variable<int> *varc = new Variable<int>("c");
 	Sum<int> *sum = new Sum<int>();
 	Ratio<int> *ratio = new Ratio<int>(one, two);
 	Product<int> *product = new Product<int>();
@@ -17,6 +19,8 @@ int main() {
 	product->add(one);
 	product->add(two);
 	product->add(var);
+	product->add(varc);
+	product->add(varb);
 	Element<int> *tmp;
 	std::map<const std::string, Element<int>*> values;
 	std::map<const std::string, int> vals;
@@ -29,6 +33,8 @@ int main() {
 	cout<<*sum<<"\n";
 	cout<<*ratio<<"\n";
 	cout<<*product<<"\n";
+	product->sort();
+	cout<<*product<<"\n";
 	cout<<*power<<"\n";
 	cout<<*(var->evaluate(values))<<"\n";
 	tmp = sum->evaluate(values);
@@ -39,5 +45,7 @@ int main() {
 	cout<<power->nevaluate(vals)<<"\n";
 	cout<<*(product->evaluate(values))<<"\n";
 	cout<<*(power->evaluate(values))<<"\n";
+	sum->collectConstants();
+	cout<<*sum<<"\n";
 	return 0;
 }

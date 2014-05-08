@@ -3,8 +3,10 @@
 
 #include <vector>
 #include <iostream>
+#include <sstream>
 #include <map>
 #include <cmath>
+#include <algorithm>
 
 namespace varint {
 namespace formula {
@@ -16,7 +18,7 @@ template<class Field> class Constant;
 
 template<class Field> class Element {
 protected:
-	int id;
+	unsigned int id;
 	Element<Field> *parent;
 public:
 	Element() : id(0) {}
@@ -27,13 +29,20 @@ public:
 	virtual Element<Field>* copy() const { return new Element<Field>(*this); }
 	virtual Element<Field>* evaluate(std::map<const std::string, Element<Field>*> values) const { return new Element<Field>(parent); }
 	virtual Field nevaluate(std::map<const std::string, Field> values, int power_precision = DEFAULT_POWER_PRECISION) const { return 0; }
-	virtual void substitute(std::map<const std::string, Element<Field>*> values) { parent->replace(id, evaluate(values)); }
+	virtual void substitute(std::map<const std::string, Element<Field>*> values) { this->parent->replace(id, evaluate(values)); }
 	Element<Field> *solve_for(Variable<Field> *variable) const {}
 	virtual std::ostream& print(std::ostream& os) const {
 		os<<"";
 		return os;
 	}
-	void replace(int id, Element<Field> *elem) {}
+	virtual std::string similarity() const {
+		std::ostringstream stream;
+		return ((std::ostringstream)(this->print(stream))).str();
+	}
+	void setId(const unsigned int _id) { id = _id; }
+	unsigned int getId() const { return id; }
+	virtual void replace(const unsigned int id, Element<Field> *elem) {}
+	virtual void remove(const unsigned int id) {}
 	friend std::ostream& operator<<(std::ostream& os, const Element<Field>& elem) {
 		return elem.print(os);
 	}
@@ -51,6 +60,7 @@ public:
 		os<<value;
 		return os;
 	}
+	const Field getValue() { return value; }
 };
 
 template<class Field> class Variable : public Element<Field> {
@@ -75,7 +85,14 @@ public:
 template<class Field> class Sum : public Element<Field> {
 protected:
 	std::vector<Element<Field>*> terms;
+	unsigned int max_id;
+	struct Less {
+		Less(const Sum<Field>& c) : curObject(c) {}
+		bool operator () ( const Element<Field> *i1, const Element<Field>* i2 ) { return i1->similarity()<i2->similarity(); } 
+		const Sum<Field>& curObject;
+	};
 public:
+	Sum() : max_id(0) {}
 	virtual Element<Field>* copy() const { return new Sum<Field>(*this); }
 	virtual void canonify() { for (typename std::vector<Element<Field>*>::const_iterator term = terms.begin(); term != terms.end(); term++) (*term)->canonify(); }
 	virtual void compress() {}
@@ -93,7 +110,52 @@ public:
 		}
 		return ret;
 	}
-	virtual void add(Element<Field>* term) { terms.push_back(term); term->setParent(this); }
+	virtual void simplifyObject() {
+		if (terms.size() == 1) {
+			this->parent->replace(this->id, *(terms.begin()));
+		} else if (terms.size() == 0) {
+			this->parent->remove(this->id);
+		}
+	}
+	virtual void collectConstants() {
+		Field res = 0;
+		typename std::vector<Element<Field>*>::iterator term = terms.begin();
+		while (term != terms.end()) {
+			if (Constant<Field> *cur = dynamic_cast<Constant<Field> *>(*term)) {
+				res = res + cur->getValue();
+				terms.erase(term);
+				delete *term;
+			}
+			term++;
+		}
+		terms.push_back(new Constant<Field>(res));
+	}	
+	virtual void sort() { std::sort(terms.begin(), terms.end(), Less(*this)); }
+	virtual void collect() {
+
+	}
+	virtual void add(Element<Field>* term) { term->setId(max_id++); terms.push_back(term); term->setParent(this); }
+	virtual void replace(const unsigned int _id, Element<Field> *elem) {
+		typename std::vector<Element<Field>*>::iterator term = terms.begin();
+		while (term != terms.end()) {
+			if((*term)->getId()==_id) {
+				Element<Field>* tmp = *term;
+				*term = elem;
+				delete tmp;
+			}
+			term++;
+		}
+	}
+	virtual void remove(const unsigned int _id) {
+		typename std::vector<Element<Field>*>::iterator term = terms.begin();
+		while (term != terms.end()) {
+			if((*term)->getId()==_id) {
+					Element<Field>* tmp = *term;
+					terms.erase(term);
+					delete tmp;
+			}
+		}
+	}
 	virtual std::ostream& print(std::ostream& os) const {
 		for (typename std::vector<Element<Field>*>::const_iterator term = terms.begin(); term != terms.end(); term++) {
 			if (term != terms.begin()) {
@@ -108,6 +170,12 @@ public:
 template<class Field> class Product : public Element<Field> {
 protected:
 	std::vector<Element<Field>*> terms;
+	unsigned int max_id;
+	struct Less {
+		Less(const Product<Field>& c) : curObject(c) {}
+		bool operator () ( const Element<Field> *i1, const Element<Field>* i2 ) { return i1->similarity()<i2->similarity(); } 
+		const Product<Field>& curObject;
+	};	
 public:
 	virtual Element<Field>* copy() { return new Product<Field>(*this); }
 	virtual Field nevaluate(std::map<const std::string, Field> values) { 
@@ -124,7 +192,56 @@ public:
 		}
 		return ret;
 	}
-	virtual void add(Element<Field>* term) { terms.push_back(term); term->setParent(this); }
+	virtual void simplifyObject() {
+		if (terms.size() == 1) {
+			this->parent->replace(this->id, *(terms.begin()));
+		} else if (terms.size() == 0) {
+			this->parent->remove(this->id);
+		}
+	}	
+	virtual void collectConstants() {
+		Field res = 1;
+		typename std::vector<Element<Field>*>::iterator term = terms.begin();
+		while (term != terms.end()) {
+			if (Constant<Field> *cur = dynamic_cast<Constant<Field> *>(*term)) {
+				res = res * cur->getValue();
+				terms.erase(term);
+				delete *term;
+			}
+			term++;
+		}
+		terms.push_back(new Constant<Field>(res));
+	}
+	virtual void sort() { std::sort(terms.begin(), terms.end(), Less(*this)); }
+	virtual void collect() {
+		this->sort();
+		typename std::vector<Element<Field>*>::iterator term = terms.begin();
+		while (term != terms.end()) {
+			term++;
+		}		
+	}
+	virtual void add(Element<Field>* term) { term->setId(max_id++); terms.push_back(term); term->setParent(this); }
+	virtual void replace(const unsigned int _id, Element<Field> *elem) {
+		typename std::vector<Element<Field>*>::iterator term = terms.begin();
+		while (term != terms.end()) {
+			if((*term)->getId()==_id) {
+				Element<Field>* tmp = *term;
+				*term = elem;
+				delete tmp;
+			}
+			term++;
+		}
+	}
+	virtual void remove(const unsigned int _id) {
+		typename std::vector<Element<Field>*>::iterator term = terms.begin();
+		while (term != terms.end()) {
+			if((*term)->getId()==_id) {
+					Element<Field>* tmp = *term;
+					terms.erase(term);
+					delete tmp;
+			}
+		}
+	}
 	virtual std::ostream& print(std::ostream& os) const {
 		for (typename std::vector<Element<Field>*>::const_iterator term = terms.begin(); term != terms.end(); term++) {
 			if (term != terms.begin()) {
@@ -143,9 +260,10 @@ template<class Field> class Ratio : public Element<Field> {
 protected:
 	Element<Field> *numerator;
 	Element<Field> *denominator;
+	enum { NUMERATOR_ID, DENOMINATOR_ID };
 public:
 	Ratio() {}
-	Ratio(Element<Field> *_numerator, Element<Field> *_denominator) : numerator(_numerator), denominator(_denominator) { _numerator->setParent(this); _denominator->setParent(this); }
+	Ratio(Element<Field> *_numerator, Element<Field> *_denominator) : numerator(_numerator), denominator(_denominator) { _numerator->setParent(this); _denominator->setParent(this); _numerator->setId(NUMERATOR_ID); _denominator->setId(DENOMINATOR_ID); }
 	virtual Element<Field>* copy() { return new Ratio<Field>(*this); }
 	virtual Field nevaluate(std::map<const std::string, Field> values) { return numerator->nevaluate(values)/denominator->nevaluate(values); }
 	virtual Element<Field>* evaluate(std::map<const std::string, Element<Field>*> values) const {
@@ -156,11 +274,31 @@ public:
 	}
 	virtual void setNumerator(Element<Field>* elem) {
 		numerator = elem;
+		elem->setId(NUMERATOR_ID);
 		elem->setParent(this);
 	}
 	virtual void setDenominator(Element<Field>* elem) {
 		denominator = elem;
+		elem->setId(DENOMINATOR_ID);
 		elem->setParent(this);
+	}
+	virtual void replace(const unsigned int _id, Element<Field> *elem) { 
+		if (_id==NUMERATOR_ID) {
+			delete numerator;
+			numerator = elem;
+		} else if (_id==DENOMINATOR_ID) {
+			delete denominator;
+			denominator = elem;
+		}
+	}
+	virtual void remove(const unsigned int _id) { 
+		if (_id==NUMERATOR_ID) {
+			delete numerator;
+			numerator = new Constant<Field>(0);
+		} else if (_id==DENOMINATOR_ID) {
+			delete denominator;
+			numerator = new Constant<Field>(0);
+		}
 	}
 	virtual std::ostream& print(std::ostream &os) const {
 		os<<"\\frac{"<<*numerator<<"}{"<<*denominator<<"}";
@@ -168,14 +306,14 @@ public:
 	}
 };
 
-template<class Field, unsigned int nargs> class Function : public Element<Field> {
+template<class Field, const unsigned int nargs> class Function : public Element<Field> {
 protected:
 	std::string name;
 	Element<Field>* expressions[nargs];
 public:
 	Function(std::string _name) : name(_name) {}
 	virtual Element<Field>* copy() { return new Function<Field, nargs>(*this); }
-	virtual void setExpression(unsigned int index, Element<Field>* _expression) { expressions[index] = _expression; _expression->setParent(this); }
+	virtual void setExpression(const unsigned int index, Element<Field>* _expression) { expressions[index] = _expression; _expression->setParent(this); _expression->setId(index); }
 	virtual Field nevaluate(std::map<const std::string, Field> values) { return 0; }
 	virtual Element<Field>* evaluate(std::map<const std::string, Element<Field>*> values) const {
 		Function<Field, nargs> *ret = new Function<Field, nargs>(name);
@@ -183,6 +321,14 @@ public:
 			ret->setExpression(i, expressions[i]);
 		}
 		return ret;
+	}
+	virtual void replace(const unsigned int _id, Element<Field> *elem) {
+		delete expressions[_id];
+		expressions[_id] = elem;
+	}
+	virtual void remove(const unsigned int _id) {
+		delete expressions[_id];
+		expressions[_id] = new Constant<Field>(0);
 	}
 	virtual std::ostream& print(std::ostream &os) const {
 		os<<*name<<"(";
@@ -206,6 +352,14 @@ public:
 	virtual Element<Field>* evaluate(std::map<const std::string, Element<Field>*> values) const {
 		Function<Field, 1> *ret = new Function<Field, 1>(name, expression->copy()->evaluate(values));
 		return ret;
+	}
+	virtual void replace(const unsigned int _id, Element<Field> *elem) {
+		delete expression;
+		expression = elem;
+	}
+	virtual void remove(const unsigned int _id) {
+		delete expression;
+		expression = new Constant<Field>(0);
 	}
 	virtual std::ostream& print(std::ostream &os) const {
 		os<<name<<"("<<*expression<<")";
@@ -279,7 +433,14 @@ public:
 		os<<*formulaElement;
 		return os;
 	}
-
+	virtual void replace(const unsigned int _id, Element<Field> *elem) {
+		delete formulaElement;
+		formulaElement = elem;
+	}
+	virtual void remove(const unsigned int _id) {
+		delete formulaElement;
+		formulaElement = new Constant<Field>(0);
+	}
 };
 
 }
